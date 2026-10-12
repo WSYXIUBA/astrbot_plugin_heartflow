@@ -1,0 +1,395 @@
+{
+  "metadata": {
+    "display_name": "StarHeart",
+    "short_desc": "Memory enhancement: remembers your chats and recalls them when relevant",
+    "desc": "Long-term memory for your bot: saves chats as memories and recalls the relevant ones; plus person / group profiles, relationship score and expression habits; optional proactive messages and a recall log; ships with its own dashboard."
+  },
+  "config": {
+    "evolve_auto": {
+      "description": "Auto persona evolution",
+      "hint": "Generate evolution proposals on a schedule (turn off to apply manually only)."
+    },
+    "evolve_min_hours": {
+      "description": "Evolution interval (hours)",
+      "hint": "Minimum hours between proposals; skipped when there is no new memory."
+    },
+    "evolve_min_memories": {
+      "description": "New memories before evolving",
+      "hint": "How many new memories to accumulate first. Too few makes the persona drift."
+    },
+    "evolve_scope": {
+      "description": "What evolution may change",
+      "hint": "desc_style: description and speaking style only (default). desc_only: description only. all: rewrite the whole persona."
+    },
+    "evolve_require_confirm": {
+      "description": "Require approval",
+      "hint": "On: only produce a proposal for you to approve (recommended). Off: write straight into the native persona."
+    },
+    "vision_enabled": {
+      "description": "Image recognition",
+      "hint": "Also turn images in chat into memory. Off ignores images entirely."
+    },
+    "vision_max_images": {
+      "description": "Max images per message",
+      "hint": "Upper bound to keep cost down."
+    },
+    "profile_auto": {
+      "description": "Auto-build profiles",
+      "hint": "Build a person (L0) / group (L1) profile automatically from new material. Generated per persona."
+    },
+    "profile_min_memories": {
+      "description": "Memories before profiling",
+      "hint": "How many memories to accumulate first. Too few makes the model guess. Counted per person and per group."
+    },
+    "profile_refresh_hours": {
+      "description": "Profile refresh (hours)",
+      "hint": "Refresh cadence; refreshed earlier when new memories arrive."
+    },
+    "profile_batch_per_tick": {
+      "description": "Profiles per tick",
+      "hint": "Max profiles built per persona per round (people and groups counted separately) to keep cost down."
+    },
+    "master_switch": {
+      "description": "Master switch",
+      "hint": "Turning it off makes StarHeart leave AstrBot's behaviour completely untouched."
+    },
+    "gate_enabled": {
+      "description": "Reply gate",
+      "hint": "A local formula decides whether the bot should speak up."
+    },
+    "gate_shadow": {
+      "description": "Shadow mode",
+      "hint": "Record scores without blocking. Recommended for a few days first."
+    },
+    "gate_threshold": {
+      "description": "Trigger threshold",
+      "hint": "0-100, higher makes the bot more reserved."
+    },
+    "memory_inject_enabled": {
+      "description": "Inject relevant memories",
+      "hint": "Inject recalled memories before the LLM request."
+    },
+    "memory_inject_top_k": {
+      "description": "Memories per turn",
+      "hint": "Maximum number of memories injected each turn."
+    },
+    "favour_enabled": {
+      "description": "Favour settlement",
+      "hint": "Track relationship score and tiers from conversations."
+    },
+    "favour_settle_mode": {
+      "description": "Settlement mode",
+      "hint": "tag: the main model reports it on its last line (currently the only implementation).",
+      "labels": [
+        "self-reported on the model's last line"
+      ]
+    },
+    "expression_enabled": {
+      "description": "Learn speaking habits",
+      "hint": "Extract habits and feed them back to the model every turn."
+    },
+    "output_enabled": {
+      "description": "Output clean-up",
+      "hint": "Collapse blank lines and strip favour markers from replies."
+    },
+    "burst_merge_enabled": {
+      "description": "Merge rapid messages",
+      "hint": "Merge several quick messages from one person into a single reply (on for private chats, optional for groups)."
+    },
+    "burst_merge_window": {
+      "description": "Merge window (seconds)",
+      "hint": "Messages from the same person inside this window are merged."
+    },
+    "burst_merge_group": {
+      "description": "Merge in groups too",
+      "hint": "Off keeps group replies strictly one-by-one, unaffected by bursts."
+    },
+    "output_typo_mode": {
+      "description": "Typo humanisation level",
+      "hint": "off / light / medium: swaps adjacent Chinese characters. Code blocks and links are left alone.",
+      "labels": [
+        "Off",
+        "Light",
+        "Medium"
+      ]
+    },
+    "import_layers": {
+      "description": "LivingMemory import layers",
+      "hint": "documents (whole memories) / atoms (atomic facts)."
+    },
+    "memory_persona_isolated": {
+      "description": "Isolate memories per persona",
+      "hint": "Each persona only reads and writes its own memories. Switch the viewing scope from the top bar."
+    },
+    "forget_enabled": {
+      "description": "Automatic forgetting",
+      "hint": "Long-unmentioned memories get archived, then forgotten."
+    },
+    "archive_after_days": {
+      "description": "Archive after (days)",
+      "hint": "How long without being mentioned before archiving."
+    },
+    "forget_after_days": {
+      "description": "Forget after (days)",
+      "hint": "How long after archiving, without being mentioned and being unimportant, before forgetting."
+    },
+    "forget_min_strength": {
+      "description": "Strength floor for forgetting",
+      "hint": "Only memories below this strength can be forgotten, so important ones are protected."
+    },
+    "forget_keep_poignancy": {
+      "description": "Emotional protection line",
+      "hint": "Anything at or above this emotional intensity is never forgotten."
+    },
+    "forget_batch_per_tick": {
+      "description": "Lifecycle batch size",
+      "hint": "Maximum memories processed per lifecycle round."
+    },
+    "auto_import_external": {
+      "description": "Auto-import livingmemory",
+      "hint": "Detect and convert not-yet-imported livingmemory memories automatically."
+    },
+    "output_split_messages": {
+      "description": "Split long replies",
+      "hint": "Send long replies as several messages, cut at semantic boundaries. Short sentences are never split."
+    },
+    "output_typing_delay": {
+      "description": "Typing delay",
+      "hint": "Delay follow-up messages by simulated typing time (the first one is sent immediately)."
+    },
+    "output_typing_per_char": {
+      "description": "Seconds per character",
+      "hint": "Typing time per character."
+    },
+    "output_typing_max": {
+      "description": "Max delay per message",
+      "hint": "Cap on the typing delay, in seconds."
+    },
+    "sticker_slot": {
+      "description": "Sticker folder",
+      "hint": "Local folder path. When a reply contains the [表情] marker a random sticker is sent. off disables it."
+    },
+    "voice_slot": {
+      "description": "Voice slot",
+      "hint": "A TTS provider id, or session to follow the conversation. off disables it."
+    },
+    "favour_daily_cap": {
+      "description": "Daily favour cap",
+      "hint": "Positive change stops accumulating at this value for the day (0 = unlimited)."
+    },
+    "favour_daily_half_life_days": {
+      "description": "Daily half-life (days)",
+      "hint": "Half-life applied to the daily score (0 = decay off)."
+    },
+    "favour_tag_required": {
+      "description": "Require a favour tag",
+      "hint": "On: only settle when the model emits a favour tag. Off: settle +1 even without one."
+    },
+    "expression_min_uses": {
+      "description": "Verified-use threshold",
+      "hint": "A habit must have been used N times before it counts as verified."
+    },
+    "memory_summary_prompt": {
+      "description": "Summary prompt override",
+      "hint": "Custom prompt for memory summarisation (empty = built-in; supports the {transcript} placeholder)."
+    },
+    "recall_withdraw_reply": {
+      "description": "Withdraw bot traces too",
+      "hint": "On recall, also drop the local traces of the bot's replies (corpus and pending summary turns)."
+    },
+    "recall_handling": {
+      "description": "What to do with recalled memories",
+      "hint": "log_only: record only. weaken: downweight (mark stale). delete: archive, still recoverable. Nothing is physically deleted.",
+      "labels": [
+        "Log only",
+        "Downweight",
+        "Archive (recoverable)"
+      ]
+    },
+    "track_platforms": {
+      "description": "Platforms to record",
+      "hint": "Platform instance ids allowed to be recorded (empty = auto-detect OneBot/QQ only). This plugin only serves QQ."
+    },
+    "person_exclude_platforms": {
+      "description": "Platforms never recorded",
+      "hint": "webchat/webui are always blocked. Sessions from these platforms never enter memory, people or lists."
+    },
+    "sys_prompt_memory_summary": {
+      "description": "System prompt: memory summary",
+      "hint": "System prompt for the memory-summary task (empty = built-in default; editable under Settings -> Model assignment)."
+    },
+    "sys_prompt_expression_extract": {
+      "description": "System prompt: expression extraction",
+      "hint": "System prompt for the expression-extraction task (empty = built-in default; editable under Settings -> Model assignment)."
+    },
+    "sys_prompt_person_profile": {
+      "description": "System prompt: person profile",
+      "hint": "System prompt for the person-profile task (empty = built-in default; editable under Settings -> Model assignment -> Profiles)."
+    },
+    "sys_prompt_group_profile": {
+      "description": "System prompt: group profile",
+      "hint": "System prompt for the group-profile task (empty = built-in default; same card under Settings -> Model assignment -> Profiles)."
+    },
+    "sys_prompt_persona_evolve": {
+      "description": "System prompt: persona evolution",
+      "hint": "System prompt for the persona-evolution task (empty = built-in default; editable under Settings -> Model assignment)."
+    },
+    "sys_prompt_forget": {
+      "description": "System prompt: forgetting",
+      "hint": "System prompt for the memory-forgetting evaluation (empty = built-in default; editable under Settings -> Model assignment)."
+    },
+    "evolve_pending_ttl_hours": {
+      "description": "Proposal expiry (hours)",
+      "hint": "Pending proposals are dropped after this long, so one missed click never blocks evolution forever."
+    },
+    "model_persona_evolve": {
+      "description": "Model for persona evolution",
+      "hint": "Which model drafts evolution proposals (empty = follow the conversation's current model; a cheap model is suggested)."
+    },
+    "gate_window_seconds": {
+      "description": "Gate scoring window (seconds): messages inside this window are scored together"
+    },
+    "gate_backoff_base": {
+      "description": "Minimum silent interval after being blocked (seconds)"
+    },
+    "gate_backoff_max": {
+      "description": "Maximum silent interval after being blocked (seconds)"
+    },
+    "session_context_enabled": {
+      "description": "Session context: pass the session's recent messages to the model"
+    },
+    "memory_capture_enabled": {
+      "description": "Memory capture: distill conversations into long-term memories (off = no new memories)"
+    },
+    "memory_capture_turns": {
+      "description": "Memory capture: summarize once every N conversation turns"
+    },
+    "memory_capture_min_interval": {
+      "description": "Memory capture: minimum interval between two summaries (seconds)"
+    },
+    "memory_capture_max_per_run": {
+      "description": "Memory capture: max memories written per run"
+    },
+    "memory_decay_half_life_days": {
+      "description": "Memory strength half-life (days): the longer a memory goes unmentioned, the weaker it gets"
+    },
+    "memory_evict_below": {
+      "description": "Memories below this strength are evicted first"
+    },
+    "memory_inject_budget_tokens": {
+      "description": "Per-turn memory injection budget (characters; rough cap to protect the context, about 1/4 in tokens)"
+    },
+    "person_exclude_ids": {
+      "description": "IDs to exclude from profiles / lists (the bot detects its own; this is a manual fallback)"
+    },
+    "model_memory_summary": {
+      "description": "Model for memory summarization (turning chats into long-term memories)",
+      "hint": "Offline plugin task, never part of the chat reply. Empty = follow the session's current model."
+    },
+    "model_expression_extract": {
+      "description": "Model for expression-habit extraction (learning how others talk)",
+      "hint": "Offline plugin task, never part of the chat reply. Empty = follow the session's current model."
+    },
+    "model_person_profile": {
+      "description": "Model for person / group profiles (both levels share this slot)",
+      "hint": "Offline plugin task, never part of the chat reply. Empty = follow the session's current model."
+    },
+    "model_forget": {
+      "description": "Model for the forgetting review (deciding what to forget)",
+      "hint": "Offline plugin task, never part of the chat reply. Empty = follow the session's current model."
+    },
+    "model_embedding": {
+      "description": "Embedding model (empty = use the embedding provider configured in AstrBot)",
+      "hint": "When empty, the embedding provider configured in AstrBot is used."
+    },
+    "model_rerank": {
+      "description": "Rerank model (empty = use the rerank provider configured in AstrBot)",
+      "hint": "When empty, the rerank provider configured in AstrBot is used."
+    },
+    "proactive_enabled": {
+      "description": "Proactive: start a topic yourself when nobody has talked for a while"
+    },
+    "proactive_shadow": {
+      "description": "Proactive shadow mode: record candidates without sending (run it for a few days first)"
+    },
+    "proactive_idle_min": {
+      "description": "Minutes of silence before considering speaking up"
+    },
+    "proactive_min_interval_min": {
+      "description": "Minimum interval between two proactive messages (minutes)"
+    },
+    "proactive_daily_cap": {
+      "description": "Max proactive messages per day"
+    },
+    "proactive_quiet_start": {
+      "description": "Quiet hours start (HH:MM)"
+    },
+    "proactive_quiet_end": {
+      "description": "Quiet hours end (HH:MM)"
+    },
+    "proactive_min_zone": {
+      "description": "Minimum relationship zone required to speak up (NEUTRAL/FAMILIAR/CLOSE)"
+    },
+    "proactive_last_only": {
+      "description": "Only send to the last person who talked"
+    },
+    "proactive_use_persona": {
+      "description": "Include the AstrBot persona and context when speaking up (off = bare message, not recommended)"
+    },
+    "proactive_style": {
+      "description": "Style prompt for opening lines (short, no follow-up questions works best)"
+    },
+    "proactive_context_memories": {
+      "description": "How many memories to inject before speaking up"
+    },
+    "proactive_auto_wl": {
+      "description": "Automatically add people you have talked to into the proactive list (off = fill it by hand)"
+    },
+    "proactive_mode_private": {
+      "description": "Private list mode: white / black / off"
+    },
+    "proactive_mode_group": {
+      "description": "Group list mode: white = whitelist only, black = exclude blacklist, off = never"
+    },
+    "proactive_wl_private": {
+      "description": "Proactive - private whitelist (QQ IDs)"
+    },
+    "proactive_wl_group": {
+      "description": "Proactive - group whitelist (group IDs)"
+    },
+    "proactive_bl_private": {
+      "description": "Proactive - private blacklist (QQ IDs)"
+    },
+    "proactive_bl_group": {
+      "description": "Proactive - group blacklist (group IDs)"
+    },
+    "recall_weaken_factor": {
+      "description": "Memory strength multiplier when a recall matches (0-1; smaller = harsher)"
+    },
+    "recall_keep_days": {
+      "description": "How many days recalled messages are kept (visible on the Recall page)"
+    },
+    "recall_interrupt_reply": {
+      "description": "Interrupt the reply still being generated when a message is recalled (its content is void anyway)"
+    },
+    "recall_react_enabled": {
+      "description": "Recall reaction: when someone recalls a message, the model decides on the spot what to say (ignore / ask / tease)",
+      "hint": "Uses AstrBot's full prompt; ignores the proactive list and quiet hours; the user just sees a normal message."
+    },
+    "recall_react_group": {
+      "description": "Recall reaction - group scope: related = only messages that involved the bot, all = anyone, off = never in groups"
+    },
+    "recall_react_images": {
+      "description": "Recall reaction: also show the recalled image to the model (native multimodal, up to 2)"
+    },
+    "recall_react_extra": {
+      "description": "Recall reaction: extra instruction appended to the recall notice (empty = none)"
+    }
+  },
+  "pages": {
+    "dashboard": {
+      "title": "StarHeart - Control Panel",
+      "description": "Memory graph / memory library / profiles / expression learning / message events / personas / settings"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+name: astrbot_plugin_starheart
+display_name: StarHeart
+author: 肆一纸心
+version: 1.0.0
+desc: 记忆增强：把对话记成长期记忆，聊天时自动想起相关的；附带人物 / 群聊画像、关系与表达习惯学习；可选主动开口与撤回记录；自带可视化面板。
+short_desc: 记忆增强：把聊天记成记忆，需要时自动想起来
+repo: https://github.com/WSYXIUBA/astrbot_plugin_starheart
+# 支持 OneBot v11（aiocqhttp）：门控/抓取/主动消息的完整能力（群与私聊事件）
+# 其它适配器（Telegram / Discord…）默认不记录，需要时把平台实例 id 写进 track_platforms
+support_platforms:
+  - aiocqhttp
+# 需要 AstrBot >= 4.24.0：注入用到 TextPart.mark_as_temp()（临时内容不进对话历史，在低版本上会被忽略）
+astrbot_version: ">=4.24.0"
+
+# 插件市场分类 / 搜索用
+tags:
+  - 拟人
+  - 记忆
+  - 好感
+  - 主动消息
+  - 可视化面板
