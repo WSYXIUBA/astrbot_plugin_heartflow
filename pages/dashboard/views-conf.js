@@ -5,10 +5,10 @@
  * 保存时只提交本页出现过的键，避免误改别的域。
  */
 
-import * as C from "./charts.js?v=1.0.0";
+import * as C from "./charts.js?v=1.0.1";
 import {
   $, $$, api, apiSafe, apiPostSafe, esc, toast, pageHead, card, mount, emptyBlock, refreshCurrent, normList, jsStr,
-} from "./store.js?v=1.0.0";
+} from "./store.js?v=1.0.1";
 
 /** key -> [标签, 说明, 类型, min, max, step, 选项] */
 export const CONFIG_META = {
@@ -27,6 +27,9 @@ export const CONFIG_META = {
   memory_capture_turns: ["触发轮数", "攒够几轮对话触发一次总结", "num", 1, 60, 1],
   memory_capture_min_interval: ["最小间隔(秒)", "两次总结之间至少隔多久", "num", 30, 7200, 30],
   memory_capture_max_per_run: ["单次上限", "一次总结最多产出几条记忆", "num", 1, 20, 1],
+  cross_session_enabled: ["跨会话动作留痕", "bot 借工具（自带或第三方工具类插件）在别的会话里发了消息时，留台账并在相关会话注入知会（被问「谁让你发的」时答得上来）", "bool"],
+  cross_session_ttl_min: ["知会有效期(分钟)", "超过这个时间的动作不再注入；长期回忆走记忆库", "num", 10, 1440, 10],
+  cross_session_memory: ["跨会话动作写入记忆", "关掉则只在有效期内注入知会，不写记忆条目", "bool"],
   memory_decay_half_life_days: ["衰减半衰期(天)", "记忆强度按指数衰减，这是半衰期", "num", 1, 365, 1],
   memory_evict_below: ["淘汰阈值", "强度低于此值的记忆会被标记 stale", "num", 0.01, 0.5, 0.01],
   memory_summary_prompt: ["总结自定义提示词", "空=内置；支持 {transcript} 占位", "text"],
@@ -54,7 +57,7 @@ export const CONFIG_META = {
   proactive_enabled: ["主动消息开关", "机器人能不能主动开口找人聊天", "bool"],
   proactive_shadow: ["影子模式", "只挑选候选不真发，先看它想说什么", "bool"],
   proactive_idle_min: ["静默多久(分钟)", "会话静默超过这么久才考虑主动", "num", 10, 2880, 10],
-  proactive_daily_cap: ["每日上限", "每个会话每天最多主动几条", "num", 1, 50, 1],
+  proactive_daily_cap: ["每日上限", "每天最多主动开口几次（当天随机排布时间点）", "num", 1, 50, 1],
   proactive_min_interval_min: ["最小间隔(分钟)", "两次主动之间至少隔多久", "num", 5, 1440, 5],
   proactive_quiet_start: ["静默开始", "HH:MM，这段时间内不主动", "text"],
   proactive_quiet_end: ["静默结束", "HH:MM", "text"],

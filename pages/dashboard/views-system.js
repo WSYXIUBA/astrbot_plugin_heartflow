@@ -8,15 +8,15 @@
  * - 设置：模块开关 + 危险区，模块卡带状态灯。
  */
 
-import * as C from "./charts.js?v=1.0.0";
+import * as C from "./charts.js?v=1.0.1";
 import {
   $, $$, api, apiSafe, apiPostSafe, esc, fmtNum, fmtPct, fmt1, fmtTime, timeAgo, toast, openDrawer, closeDrawer,
   confirmModal, formModal, pageHead, card, kpiCard, kpis, secTitle, mount, emptyBlock, skelBlock, jsStr, STATE, segmentHtml,
   syncSeg, bridge, EP, refreshCurrent, goPage, countUp,
-} from "./store.js?v=1.0.0";
-import { renderDomainConf, domainRowsHtml, CONFIG_META } from "./views-conf.js?v=1.0.0";
-import { ATOM_LABEL } from "./views-memory.js?v=1.0.0";
-import { GRAPH_PALETTE } from "./graph.js?v=1.0.0";
+} from "./store.js?v=1.0.1";
+import { renderDomainConf, domainRowsHtml, CONFIG_META } from "./views-conf.js?v=1.0.1";
+import { ATOM_LABEL } from "./views-memory.js?v=1.0.1";
+import { GRAPH_PALETTE } from "./graph.js?v=1.0.1";
 
 const ATOM_COLOR = GRAPH_PALETTE.memory;
 const MODULES = [

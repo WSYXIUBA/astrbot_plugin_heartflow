@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import random
 import re
 import time
 import unicodedata
@@ -244,6 +245,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "memory_capture_turns": 6,
     "memory_capture_min_interval": 300,
     "memory_capture_max_per_run": 5,
+    # 跨会话动作留痕：bot 借工具（含第三方工具类插件）在别的会话里发了什么，这里留台账 +
+    # 在相关会话注入知会，并在记忆库留一条（避免「问它谁让你发的，它答不知道」）。
+    "cross_session_enabled": True,
+    "cross_session_ttl_min": 120,
+    "cross_session_memory": True,
     "memory_summary_prompt": "",     # 记忆总结自定义提示词（空 = 用内置；支持 {transcript} 占位）
     # 插件自管任务的系统提示词覆盖（留空 = 用内置默认；面板「模型分配」可展开编辑）
     "sys_prompt_memory_summary": "",
@@ -387,7 +393,8 @@ CONFIG_DOMAINS: dict[str, list[str]] = {
     "memory": ["memory_summary_prompt", "memory_inject_enabled", "memory_inject_top_k", "memory_inject_budget_tokens",
                "memory_decay_half_life_days", "memory_evict_below",
                "memory_capture_enabled", "memory_capture_turns",
-               "memory_capture_min_interval", "memory_capture_max_per_run"],
+               "memory_capture_min_interval", "memory_capture_max_per_run",
+               "cross_session_enabled", "cross_session_ttl_min", "cross_session_memory"],
     "expression": ["expression_enabled", "expression_min_uses"],
     "favour": ["favour_enabled", "favour_settle_mode", "favour_daily_cap", "favour_daily_half_life_days", "favour_tag_required"],
     "recall": ["recall_handling", "recall_weaken_factor", "recall_keep_days", "recall_withdraw_reply",
@@ -1030,12 +1037,20 @@ class StarHeartService:
     # ---------------- 主动消息 ----------------
     async def proactive_view(self, limit: int = 200) -> dict[str, Any]:
         cfg = await self.config()
-        baseline = await self.store.proactive_baseline(self._day_start_ts(cfg))
+        day_start = self._day_start_ts(cfg)
+        baseline = await self.store.proactive_baseline(day_start)
+        plan = await self.store.get_config("proactive_plan", {}) or {}
+        date = self._day_str(cfg)
+        raw = plan.get("slots") or []
+        slots = ([float(x) for x in raw if isinstance(x, (int, float)) and float(x) > 0]
+                 if str(plan.get("date") or "") == date else [])
         return {
             "items": await self.store.list_proactive(limit),
             "sessions": baseline["sessions"],
             "candidates": baseline["candidates"],
             "config": {k: cfg.get(k) for k in CONFIG_DOMAINS["proactive"]},
+            "plan": {"date": str(plan.get("date") or ""), "today": date, "cap": plan.get("cap"),
+                     "slots": slots, "day_start": day_start, "day_end": day_start + 86400.0},
         }
 
     def _tzinfo(self, cfg: dict[str, Any]):
@@ -1056,6 +1071,10 @@ class StarHeartService:
             except Exception:
                 pass
         return None
+
+    def timezone(self, cfg: dict[str, Any]):
+        """对外别名：插件各处要「按 AstrBot 时区」算时间时统一走它（容器时区常见是 UTC）。"""
+        return self._tzinfo(cfg)
 
     def _day_start_ts(self, cfg: dict[str, Any], now_ts: float | None = None) -> float:
         """「今天」从哪一刻算：本地（AstrBot 时区）自然日 00:00。
@@ -1104,6 +1123,116 @@ class StarHeartService:
             return s_m <= cur < e_m
         return cur >= s_m or cur < e_m  # 跨午夜
 
+    # ---------------- 主动开口排布（当天随机时间点） ----------------
+    # 机制：不再「最小间隔一到就发」——每天先把 N 个开口时间点排好（N=每日上限，
+    # 落在当天 0:00–23:59 里随机分布、避开静默时段），扫描只在「到点了」才尝试开口；
+    # 改上限 / 跨天自动重排；被更晚时间点追上的旧时间点按「错过」作废。
+    @staticmethod
+    def _hm_to_min(v: Any) -> int | None:
+        m = re.match(r"^(\d{1,2}):(\d{2})$", str(v or "").strip())
+        if not m:
+            return None
+        h, mi = int(m.group(1)), int(m.group(2))
+        return h * 60 + mi if 0 <= h < 24 and 0 <= mi < 60 else None
+
+    def _day_segments(self, cfg: dict[str, Any], day_start: float) -> list[tuple[float, float]]:
+        """当天可开口时段 = 全天 − 静默时段（静默可为跨午夜区间）。"""
+        day_end = day_start + 86400.0
+        segs: list[tuple[float, float]] = [(day_start, day_end)]
+        s_m = self._hm_to_min(cfg.get("proactive_quiet_start"))
+        e_m = self._hm_to_min(cfg.get("proactive_quiet_end"))
+        if s_m is not None and e_m is not None and s_m != e_m:
+            qsegs = ([(day_start + s_m * 60.0, day_start + e_m * 60.0)] if s_m < e_m
+                     else [(day_start, day_start + e_m * 60.0), (day_start + s_m * 60.0, day_end)])
+            for q0, q1 in qsegs:
+                nxt: list[tuple[float, float]] = []
+                for a, b in segs:
+                    if q1 <= a or q0 >= b:
+                        nxt.append((a, b))
+                        continue
+                    if a < q0:
+                        nxt.append((a, q0))
+                    if q1 < b:
+                        nxt.append((q1, b))
+                segs = nxt
+        return [(a, b) for a, b in segs if b - a > 60]
+
+    def _gen_slots(self, cfg: dict[str, Any], n: int, lo: float, hi: float, day_start: float) -> list[float]:
+        """在 [lo, hi] ∩ 可开口时段里随机排 n 个时间点：分层采样，整段分散、不扎堆。"""
+        avail = [(max(a, lo), min(b, hi)) for a, b in self._day_segments(cfg, day_start)]
+        avail = [(a, b) for a, b in avail if b - a > 30]
+        total = sum(b - a for a, b in avail)
+        if n <= 0 or total <= 60:
+            return []
+        n = min(n, max(1, int(total // 300)))  # 两位至少隔 5 分钟，排不下就少排
+        slots: list[float] = []
+        for i in range(n):
+            t0, t1 = total * i / n, total * (i + 1) / n
+            w = t1 - t0
+            target = random.uniform(t0 + w * 0.15, t1 - w * 0.15) if w > 120 else random.uniform(t0, t1)
+            acc = 0.0
+            ts = avail[-1][1] - 1.0
+            for a, b in avail:
+                if target <= acc + (b - a):
+                    ts = a + (target - acc)
+                    break
+                acc += b - a
+            slots.append(round(ts, 1))
+        slots.sort()
+        return slots
+
+    async def _plan_sent_today(self, day_start: float) -> int:
+        """今天已真发出几条（不含手动试发）——排布余量的记数源。"""
+        row = await (await self.store.db.execute(
+            "SELECT COUNT(*) FROM hf_proactive_log WHERE status='sent' AND ts >= ? "
+            "AND guard NOT LIKE '%\"manual\"%'", (day_start,)
+        )).fetchone()
+        return int(row[0] or 0) if row else 0
+
+    async def _plan_ensure(self, cfg: dict[str, Any], now_ts: float) -> dict[str, Any]:
+        """取/刷新今天的开口排布。触发重排：新的一天、每日上限变化。"""
+        day_start = self._day_start_ts(cfg, now_ts)
+        date = self._day_str(cfg, now_ts)
+        cap = max(0, int(cfg.get("proactive_daily_cap") or 0))
+        sent = await self._plan_sent_today(day_start)
+        need = max(0, cap - sent)
+        plan = await self.store.get_config("proactive_plan", {}) or {}
+        raw = plan.get("slots") or []
+        slots = [float(x) for x in raw if isinstance(x, (int, float)) and float(x) > 0]
+        changed = False
+        if str(plan.get("date") or "") != date or int(plan.get("cap") or -1) != cap:
+            # 新的一天 / 上限变了：按「当前使用之后的剩余量」重排剩余时间条
+            slots = self._gen_slots(cfg, need, max(now_ts, day_start), day_start + 86400.0, day_start)
+            changed = True
+        else:
+            while len(slots) >= 2 and now_ts >= slots[1]:
+                slots.pop(0)  # 被更晚时间点追上的：按「错过」作废
+                changed = True
+            if len(slots) > need:
+                slots = slots[:need]
+                changed = True
+        if changed:
+            plan = {"date": date, "cap": cap, "slots": slots, "gen_ts": now_ts}
+            await self.store.set_config("proactive_plan", plan)
+        return {"date": date, "cap": cap, "slots": slots}
+
+    async def _plan_consume(self) -> dict[str, Any]:
+        """一个开口真的发出去了：消耗最早的那个（也就是刚到的）时间点。"""
+        plan = await self.store.get_config("proactive_plan", {}) or {}
+        slots = [float(x) for x in (plan.get("slots") or []) if isinstance(x, (int, float))]
+        if slots:
+            slots.pop(0)
+        plan["slots"] = slots
+        await self.store.set_config("proactive_plan", plan)
+        return plan
+
+    def _ts_hhmm(self, cfg: dict[str, Any], ts: float) -> str:
+        from datetime import datetime
+
+        tz = self._tzinfo(cfg)
+        d = datetime.fromtimestamp(ts, tz) if tz is not None else datetime.fromtimestamp(ts)
+        return d.strftime("%H:%M")
+
     async def proactive_scan(self) -> dict[str, Any]:
         """真扫一遍：够格的说一句（影子模式只落候选）。"""
         cfg = await self.config()
@@ -1121,6 +1250,8 @@ class StarHeartService:
         baseline = await self.store.proactive_baseline(self._day_start_ts(cfg))
         favours = {str(f.get("user_id") or ""): f for f in await self.store.list_favours()}
         now_ts = time.time()
+        plan = await self._plan_ensure(cfg, now_ts)
+        due_ts: float | None = float(plan["slots"][0]) if plan.get("slots") else None
         hhmm = self._now_hhmm(cfg)
         quiet = self._quiet_now(cfg, hhmm)
         min_rank = ZONE_RANK.get(str(cfg.get("proactive_min_zone") or "FAMILIAR"), 3)
@@ -1174,8 +1305,13 @@ class StarHeartService:
                     })
                 continue
             guard["zone"] = zone
+            guard["due"] = round(due_ts) if due_ts else None
             reason = ""
-            if idle_min < max_idle:
+            if due_ts is None:
+                reason = "今日预定开口已排完"
+            elif now_ts < due_ts:
+                reason = f"未到预定开口时间（下次 {self._ts_hhmm(cfg, due_ts)}）"
+            elif idle_min < max_idle:
                 reason = f"距上次发言 {idle_min:.0f} 分钟 < {max_idle:.0f}"
             elif quiet:
                 reason = "静默时段"
@@ -1215,7 +1351,11 @@ class StarHeartService:
                 "guard": guard, "text": text,
             })
             sent += 1 if ok else 0
-        return {"scanned": len(sessions), "candidates": cands, "sent": sent, "skipped": skipped, "quiet": quiet}
+            if ok:
+                plan = await self._plan_consume()
+                _left = [float(x) for x in (plan.get("slots") or []) if isinstance(x, (int, float))]
+                due_ts = _left[0] if _left else None
+        return {"scanned": len(sessions), "candidates": cands, "sent": sent, "skipped": skipped, "quiet": quiet, "next_open": due_ts}
 
     async def _build_proactive_prompt(self, item: dict[str, Any], zone: str, cfg: dict[str, Any]) -> dict[str, Any]:
         """拼出真正发给模型的东西：人格（可选）+ 情境 + 记忆。"""
@@ -2118,10 +2258,16 @@ class StarHeartService:
         if not callable(gen):
             return {"ok": False, "error": "模型通道不可用：先在「设置 → 模型」里配好一个可用的对话模型"}
         try:
-            min_mem = int((await self.config()).get("profile_min_memories") or 5)
+            _cfg = await self.config()
+            min_mem = int(_cfg.get("profile_min_memories") or 5)
         except Exception:
+            _cfg = {}
             min_mem = 5
         min_mem = max(1, min_mem)
+        # 记忆时间锚要用「AstrBot 时区」而不是容器本地时间（容器常见是 UTC，会整体差 8 小时）
+        from datetime import datetime
+
+        tz = self._tzinfo(_cfg)
         dossier = await self.store.subject_dossier(pid, k, limit=120, persona_id=persona_id)
         mems = dossier.get("memories") or []
         if not mems and not dossier.get("msgs"):
@@ -2159,7 +2305,12 @@ class StarHeartService:
             when = ""
             if m.get("occurred_at"):
                 try:
-                    when = time.strftime("%Y-%m-%d %H:%M", time.localtime(float(m["occurred_at"])))
+                    ts = float(m["occurred_at"])
+                    when = (
+                        datetime.fromtimestamp(ts, tz).strftime("%Y-%m-%d %H:%M")
+                        if tz is not None
+                        else time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
+                    )
                 except Exception:
                     when = ""
             bits = [f"{i}. [{m.get('atom_type') or ''}{('/' + when) if when else ''}] {m.get('summary') or ''}"]

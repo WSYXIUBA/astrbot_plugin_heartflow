@@ -198,6 +198,21 @@
     "description": "记忆捕获：单轮最多写入几条记忆",
     "default": 5
   },
+  "cross_session_enabled": {
+    "type": "bool",
+    "description": "跨会话动作留痕：bot 借工具（AstrBot 自带或第三方工具类插件）在别的会话里发了消息时，留台账 + 在相关会话注入知会，避免被问「谁让你发的」时答不知道（关掉则不留痕、不注入）",
+    "default": true
+  },
+  "cross_session_ttl_min": {
+    "type": "int",
+    "description": "跨会话动作知会有效期（分钟）：超过这个时间的动作不再注入（长期回忆走记忆库）",
+    "default": 120
+  },
+  "cross_session_memory": {
+    "type": "bool",
+    "description": "跨会话动作写入记忆库（关掉则只在有效期内注入知会，不写记忆）",
+    "default": true
+  },
   "memory_decay_half_life_days": {
     "type": "float",
     "description": "记忆强度半衰期（天）：越久没被提及越弱",
@@ -389,7 +404,7 @@
   },
   "proactive_daily_cap": {
     "type": "int",
-    "description": "每天最多主动开口几次",
+    "description": "每天最多主动开口几次（当天随机排布时间点）",
     "default": 3
   },
   "proactive_min_interval_min": {

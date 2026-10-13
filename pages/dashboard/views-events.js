@@ -9,13 +9,13 @@
  * - 好感：关系是连续量 → 区间色带 + 数值环，而不是只写一个数字。
  */
 
-import * as C from "./charts.js?v=1.0.0";
+import * as C from "./charts.js?v=1.0.1";
 import {
   $, $$, api, apiSafe, contactLabel, apiPostSafe, esc, fmtNum, fmt1, fmtPct, fmtTime, timeAgo, toast, openDrawer, closeDrawer,
   pageHead, card, kpiCard, kpis, mount, emptyBlock, skelBlock, jsStr, STATE, segmentHtml, syncSeg, countUp,
   refreshCurrent, goPage,
-} from "./store.js?v=1.0.0";
-import { renderDomainConf } from "./views-conf.js?v=1.0.0";
+} from "./store.js?v=1.0.1";
+import { renderDomainConf } from "./views-conf.js?v=1.0.1";
 
 const ZONE_RANK = { HOSTILE: 0, COLD: 1, NEUTRAL: 2, FAMILIAR: 3, CLOSE: 4, DEVOTED: 5 };
 const ZONE_COLOR = { HOSTILE: "#f44336", COLD: "#90a4ae", NEUTRAL: "#8e8e93", FAMILIAR: "#03c9d7", CLOSE: "#3c96ca", DEVOTED: "#e0559a" };
@@ -835,7 +835,7 @@ export async function renderProactivePool() {
   const html = `
   ${pageHead(
     "主动消息",
-    `静默满 <b>${idleMin} 分钟</b>才有资格；每会话每天最多 <b>${cap}</b> 条；判定顺序：可见性名单 → 主动名单 → 额度/时钟/关系档`,
+    `静默满 <b>${idleMin} 分钟</b>才有资格；每天最多 <b>${cap}</b> 条开口（当天随机排布时间点）；判定顺序：可见性名单 → 主动名单 → 开口时间点 → 额度/时钟/关系档`,
     `<button class="btn p" onclick="hfProactiveScan(this)">立即扫描一轮</button>
      <button class="btn s" onclick="goPage(\"messages\", \"proactive\")">参数与审计 →</button>`,
     "☎"
@@ -1165,6 +1165,14 @@ export async function renderProactiveMatrix() {
   const topReason = reasonRows[0] || "";
   const hasZone = list.some((s) => s.zone);
 
+  // 「开口时钟 · 额度 · 静默」卡片（自投递审计搬上来）要用的一组真值：config + proactive_baseline + 排布 plan
+  const sessAll = Array.isArray(log.sessions) ? log.sessions : [];
+  const baseLast = sessAll.reduce((m, x) => Math.max(m, Number(x.last_proactive_ts) || 0), 0);
+  const winSent = items.filter((x) => x.status === "sent");
+  const lastSent = baseLast || (winSent.length ? Math.max.apply(null, winSent.map((x) => Number(x.ts) || 0)) : 0);
+  const gapLeftS = lastSent && gapMin ? Math.max(0, gapMin * 60 - (nowS - lastSent)) : 0;
+  const cfgStr = (v) => (v == null ? "" : String(v));
+
   const gatesTip = inQuiet === null ? (qs !== null && qs === qe ? "起止相同视为不启用静默" : "未配置静默时段（不拦截）") : inQuiet ? "当前在静默期内" : "当前不在静默期";
   const unlockTxt = inQuiet && qe !== null ? `${qeTxt} 解禁` : inQuiet === null ? "不受静默限制" : "现在就可以发（受额度 / 间隔约束）";
   const conclusion = inQuiet === null
@@ -1176,17 +1184,17 @@ export async function renderProactiveMatrix() {
   const html = `
   ${pageHead(
     "主动 · 闸门矩阵",
-    "行 = 会话，列 = 五道闸门：<b>绿=通过、琥珀=拦下</b>。判定顺序是固定的：名单 → 静默 → 额度 → 间隔 → 关系档",
+    "行 = 会话，列 = 五道闸门：<b>绿=通过、琥珀=拦下</b>。判定顺序是固定的：名单 → 开口时间点 → 静默 → 额度 → 间隔 → 关系档",
     `<button class="btn p" onclick="hfProactiveScan(this)">立即扫描一轮</button>`,
     "☎",
     conclusion
   )}
   <div class="grid g23 sec">
-    ${card(`<div style="max-height:min(60vh,560px);overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable"><div id="proMatrix"></div></div>`, {
+    ${card(`<div id="pmClock"></div><div id="pmClockRows" style="margin-top:10px"></div>`, { title: "开口时钟 · 额度 · 静默" })}
+    ${card(`<div style="max-height:min(60vh,560px);overflow-y:auto;overflow-x:auto;scrollbar-gutter:stable"><div id="proMatrix"></div></div>`, {
       title: "会话 × 闸门（此刻的判定）",
-      sub: "只列<b>名单内</b>的会话（不在主动名单里的不显示）；行多时向下滚动看全。点格子看这道闸的当前值，点行看完整判定与快捷试发",
+      sub: "只列<b>名单内</b>的会话（不在主动名单里的不显示）；行多时滚动看全。点格子看这道闸的当前值，点行看完整判定与快捷试发",
     })}
-    ${card(`<div id="proSide"></div>`, { title: "此刻什么时候能发" })}
   </div>
   <div class="mut" style="font-size:11.5px;margin-top:10px;line-height:1.8">
     · 被挡住的记录都留在「投递审计」里。<br>
@@ -1199,7 +1207,7 @@ export async function renderProactiveMatrix() {
       const colDefs = [
         { key: "wl", label: "名单", tip: "可见性名单 + 主动名单的判定结果" },
         { key: "quiet", label: "静默", tip: `${qsTxt || "—"} – ${qeTxt || "—"}（${gatesTip}）` },
-        { key: "cap", label: "额度", tip: cap ? `每会话每天最多 ${cap} 条（自然日 0 点重置）` : "未配置上限" },
+        { key: "cap", label: "额度", tip: cap ? `每天最多 ${cap} 条（当天随机排布时间点 · 0 点重置）` : "未配置上限" },
         { key: "gap", label: "间隔", tip: gapMin ? `距上次主动需满 ${gapMin} 分钟` : "未配置最小间隔" },
       ];
       if (hasZone) colDefs.push({ key: "zone", label: "关系档", tip: "关系档低于门槛时会拦下" });
@@ -1286,7 +1294,7 @@ export async function renderProactiveMatrix() {
                <div class="kv">会话静默<span class="mono">${fmt1((Number(s.idle_min) || 0) / 60)} 小时</span></div>
                <div class="kv">今日已发<span class="mono">${Number(s.sent_today) || 0} / ${cap || "不限"}</span></div>
                <div class="kv">上次主动<span>${Number(last.last_proactive_ts) ? esc(timeAgo(last.last_proactive_ts)) : "—"}</span></div>
-               <div class="mut" style="font-size:11px;margin-top:9px">静默满 ${fmtNum(idleMin)} 分钟才有资格；判定顺序：可见性名单 → 主动名单 → 额度 / 时钟 / 关系档。</div>
+               <div class="mut" style="font-size:11px;margin-top:9px">静默满 ${fmtNum(idleMin)} 分钟才有资格；判定顺序：可见性名单 → 主动名单 → 开口时间点 → 额度 / 时钟 / 关系档。</div>
                <div class="row" style="gap:6px;margin-top:12px">
                  <button class="btn s" onclick="hfProactivePreview(this, ${jsStr(sid)})" ${sid ? "" : "disabled"}>试看一条</button>
                  <button class="btn s" onclick="hfProactiveSend(${jsStr(sid)}, this)" ${sid ? "" : "disabled"}>真发一条</button>
@@ -1297,23 +1305,86 @@ export async function renderProactiveMatrix() {
         })
       );
 
-      const sideEl = host.querySelector("#proSide");
-      if (sideEl) {
-        const reasonLines = reasonRows
-          .map((t, i) => `<div class="kv">${esc(t)}<span class="mono">${fmtNum(reasons[t])}</span></div>`)
-          .join("");
-        sideEl.innerHTML =
-          `<div class="kv">此刻<span>${inQuiet === null ? "静默未启用" : inQuiet ? "被静默挡着" : "可以发"}</span></div>
-           <div class="kv">下一次解禁<span>${esc(unlockTxt)}</span></div>
-           <div class="kv">剩余额度<span class="mono">${cap ? Math.max(0, cap - todaySent) + " / " + cap : "不限"}</span></div>
-           <div class="kv">名单内会话<span class="mono">${fmtNum(allowed)}</span></div>
-           <div class="kv">被拦下的会话<span class="mono">${fmtNum(Number(rules.blocked) || 0)}</span></div>
-           <div class="sec" style="margin:11px 0 5px;font-size:12px"><b>最近最多被拦的原因</b>（窗口内 ${fmtNum(items.length)} 条记录）</div>
-           ${reasonLines || '<div class="mut" style="font-size:11.5px">窗口内没有被拦记录</div>'}
-           <div class="mut" style="font-size:11px;margin-top:11px;line-height:1.8">
-             · 人工「一键试发」不占额度、也不计入最小间隔<br>
-             · 完整流水与节律在页底折叠卡「投递审计」
-           </div>`;
+      const clockEl = host.querySelector("#pmClock");
+      if (clockEl) {
+        const line = (label, body, right) => `<div class="hfline">
+        <div class="row bt" style="margin-bottom:5px;font-size:12px">
+          <span>${label}</span><span class="${right.cls || ""}">${right.text}</span></div>
+        ${body}
+        <div class="row bt mut" style="font-size:10.5px;margin-top:4px"><span>${right.l}</span><span>${right.r}</span></div>
+      </div>`;
+        const parts = [];
+        // 合并条（全天 0:00–23:59）：白线 = 现在；绿线 = 预定开口（上方标注时刻）；斜纹 = 静默区间；小灰杠 = 已开口
+        const plan = log.plan || {};
+        const slotList = (Array.isArray(plan.slots) ? plan.slots : []).map(Number).filter((tt) => tt > 0);
+        const dayS = Number(plan.day_start) || 0;
+        const dayE = Number(plan.day_end) || dayS + 86400;
+        const planFresh = !!dayS && String(plan.date || "") === String(plan.today || "");
+        const hmOf = (ts) => { const d = new Date(ts * 1000); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); };
+        const pctOf = (ts) => (dayE > dayS ? Math.max(0, Math.min(100, ((ts - dayS) / (dayE - dayS)) * 100)) : 0);
+        const sentTicks = winSent.filter((x) => !(x.guard && x.guard.manual) && Number(x.ts) >= dayS);
+        let barMarks = `<span class="otrack"></span>`;
+        if (qs !== null && qe !== null && qs !== qe) {
+          const qsegs = qs < qe ? [[qs, qe]] : [[qs, 1440], [0, qe]];
+          barMarks += qsegs.map(([a, b]) => `<span class="oq" style="left:${(a / 14.4).toFixed(2)}%;width:${((b - a) / 14.4).toFixed(2)}%"></span>`).join("");
+        }
+        barMarks += sentTicks.map((x) => `<span class="otick" style="left:${pctOf(Number(x.ts)).toFixed(2)}%"></span>`).join("");
+        if (planFresh) {
+          barMarks += slotList.map((ts) => {
+            const p = pctOf(ts);
+            const align = p < 5 ? "transform:translateX(0)" : p > 95 ? "transform:translateX(-100%)" : "transform:translateX(-50%)";
+            return `<span class="gopen" style="left:${p.toFixed(2)}%"></span><span class="golbl" style="left:${p.toFixed(2)}%;${align}">${hmOf(ts)}</span>`;
+          }).join("");
+        }
+        barMarks += `<span class="hfnow" style="left:${pctOf(nowS).toFixed(2)}%"></span>`;
+        const nextTs = slotList.length ? slotList[0] : 0;
+        let cdTxt = "未排布", cdCls = "mut";
+        if (planFresh) {
+          if (!nextTs) {
+            cdTxt = "已排完";
+          } else if (nextTs <= nowS) {
+            cdTxt = "已到点"; cdCls = "ok";
+          } else {
+            const leftS = nextTs - nowS;
+            cdTxt = "还需 " + (leftS >= 3600 ? `${Math.floor(leftS / 3600)} 小时 ${Math.round((leftS % 3600) / 60)} 分` : `${Math.max(1, Math.round(leftS / 60))} 分钟`);
+            cdCls = "";
+          }
+        }
+        const rightTxt = !planFresh ? "今日开口未排布"
+          : !nextTs ? "今日预定开口已排完"
+          : nextTs <= nowS ? `已到预定开口时间（${hmOf(nextTs)}）`
+          : `下次开口 ${hmOf(nextTs)}`;
+        parts.push(line("开口时钟",
+          `<div class="row" style="gap:10px;align-items:flex-end">
+            <div class="${cdCls}" style="min-width:92px;font-size:12px;white-space:nowrap">${cdTxt}</div>
+            <div class="hfopen" style="flex:1">${barMarks}</div>
+          </div>`,
+          { text: rightTxt, cls: cdCls === "ok" ? "ok" : cdCls === "mut" ? "mut" : "",
+            l: !planFresh ? "未排布（主动扫描开启后自动生成）" : lastSent ? `上次主动 ${timeAgo(lastSent)}` : "还没主动过",
+            r: "白线 = 现在 · 绿线 = 预定开口 · 斜纹 = 静默区间" }));
+        if (cap) {
+          const n = Math.min(cap, 24);
+          const dots = Array.from({ length: n }).map((_, k) => `<i class="${k < todaySent ? "on" : ""}"></i>`).join("");
+          const midnight = new Date(); midnight.setHours(24, 0, 0, 0);
+          const hoursLeft = Math.max(0, (midnight.getTime() / 1000 - nowS) / 3600);
+          const nextRel = `每天 0 点重置（还有约 ${hoursLeft < 1 ? Math.max(1, Math.round(hoursLeft * 60)) + " 分钟" : Math.round(hoursLeft) + " 小时"}）`;
+          parts.push(line("今日额度（自然日）", `<div class="hfdots">${dots}</div>`,
+            { text: `${todaySent} / ${cap} 条${todaySent >= cap ? "（已达上限）" : ""}`, cls: todaySent >= cap ? "warn" : "ok",
+              l: nextRel, r: "0:00–24:00 · 手动试发不占额度" }));
+        } else {
+          parts.push(line("今日额度（自然日）", `<div class="hfdots"><i></i></div>`, { text: `${todaySent} 条（未配置上限）`, cls: "mut", l: "没设上限", r: "不会因额度被拦" }));
+        }
+        clockEl.innerHTML = parts.join("");
+      }
+      const clockRows = host.querySelector("#pmClockRows");
+      if (clockRows) {
+        const row = (k, v, extra) => `<div class="kv">${k}<span>${v}${extra ? ` <span class="mut">${extra}</span>` : ""}</span></div>`;
+        clockRows.innerHTML =
+          row("距上次主动", lastSent ? esc(timeAgo(lastSent)) : "全表没有发送记录", gapMin ? (gapLeftS > 0 ? "还需等约 " + Math.ceil(gapLeftS / 60) + " 分钟（最小间隔仅对同一会话生效）" : "已过最小间隔（会话级护栏）") : "未配置最小间隔") +
+          row("今日额度（自然日）", cap ? `${fmtNum(todaySent)} / ${fmtNum(cap)} 条` : `${fmtNum(todaySent)} 条（无上限）`, "自然日 0:00–24:00（按 AstrBot 时区）· 每天 0 点重置 · 手动试发不占额度") +
+          row("静默时段", qs !== null && qe !== null ? `${esc(cfgStr(cfg.proactive_quiet_start))} – ${esc(cfgStr(cfg.proactive_quiet_end))}` : "未配置", inQuiet === null ? "（不拦截）" : inQuiet ? "现在在静默期内" : "现在不在静默期") +
+          row("静默多久才考虑", cfg.proactive_idle_min != null ? `${fmtNum(cfg.proactive_idle_min)} 分钟` : "未配置") +
+          row("影子模式", cfg.proactive_shadow ? "已开启（只挑选、不真发）" : "关闭（会真发）");
       }
     },
   };
@@ -1332,10 +1403,6 @@ export async function renderProactiveAudit() {
     + kpiCard("paSkip", fmtNum(st.skipped || 0), "窗口内被拦下")
     + kpiCard("paFail", fmtNum(st.failed || 0), "发送失败")
   )}
-  ${card(
-    `<div id="paCount"></div><div id="paCountRows" style="margin-top:10px"></div>`,
-    { title: "开口时钟 · 额度 · 静默" }
-  )}
   ${card(`<div id="paHeat"></div>`, { title: "投递节律（24 小时）", sub: "本页流水按小时聚合：颜色越深 = 这个小时里「想开口」的次数越多；灰 = 一次都没有" })}
   <div class="grid g23 sec">
     ${card(`<div id="paChart"></div>`, { title: "状态构成", sub: "被拦下的多半是静默时长/额度/名单，reason 里写了原因" })}
@@ -1345,87 +1412,7 @@ export async function renderProactiveAudit() {
   return {
     html,
     mount: (host) => {
-      // 开口时钟 / 额度 / 静默：**线性**表达（用户否掉圆环+百分比：仪表盘读不出精确值）
-  const P = C.palette();   // 主题色板（深/浅色都能适配）
-  // ── 线性面板要用的一组真值（全部按真配置 + 后端 proactive_baseline 全表聚核算）
-  const cfg = data.config || {};
-  const nowS = Date.now() / 1000;
-  const sess = Array.isArray(data.sessions) ? data.sessions : [];
-  const baseLast = sess.reduce((m, x) => Math.max(m, Number(x.last_proactive_ts) || 0), 0);
-  const sent24 = sess.reduce((a, x) => a + (Number(x.sent_today) || 0), 0);
-  const winSent = items.filter((x) => x.status === "sent");
-  const lastSent = baseLast || (winSent.length ? Math.max.apply(null, winSent.map((x) => Number(x.ts) || 0)) : 0);
-  const gapMin = Number(cfg.proactive_min_interval_min || 0) || 0;
-  const gapLeftS = lastSent && gapMin ? Math.max(0, gapMin * 60 - (nowS - lastSent)) : 0;
-  const cap = Number(cfg.proactive_daily_cap || 0) || 0;
-  const cfgStr = (v) => (v == null ? "" : String(v));
-  const hm = (v) => {
-    const m = /^(\d{1,2}):(\d{2})$/.exec(String(v || "").trim());
-    return m && Number(m[1]) < 24 && Number(m[2]) < 60 ? Number(m[1]) * 60 + Number(m[2]) : null;
-  };
-  const qs = hm(cfg.proactive_quiet_start);
-  const qe = hm(cfg.proactive_quiet_end);
-  const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
-  let inQuiet = null;
-  if (qs !== null && qe !== null && qs !== qe) inQuiet = qs < qe ? nowMin >= qs && nowMin < qe : nowMin >= qs || nowMin < qe;
-  mount(host, "#paCount", (el) => {
-    const line = (label, body, right) => `<div class="hfline">
-        <div class="row bt" style="margin-bottom:5px;font-size:12px">
-          <span>${label}</span><span class="${right.cls || ""}">${right.text}</span></div>
-        ${body}
-        <div class="row bt mut" style="font-size:10.5px;margin-top:4px"><span>${right.l}</span><span>${right.r}</span></div>
-      </div>`;
-    const parts = [];
-    if (gapMin && lastSent) {
-      const total = gapMin * 60;
-      const pct = Math.max(0, Math.min(100, (1 - gapLeftS / total) * 100));
-      const ready = gapLeftS <= 0;
-      parts.push(line("开口时钟",
-        `<div class="hfbar"><i style="width:${pct.toFixed(1)}%;background:${ready ? "var(--success,#22a06b)" : "var(--warning,#e0a800)"}"></i><span class="hfnow" style="left:${pct.toFixed(1)}%"></span></div>`,
-        { text: ready ? `现在可以开口（已过 ${gapMin} 分间隔）` : `还需等 ${Math.ceil(gapLeftS / 60)} 分钟`, cls: ready ? "ok" : "warn",
-          l: `上次主动 ${timeAgo(lastSent)}`, r: `间隔 ${gapMin} 分 · 仅对同一会话生效` }));
-    } else {
-      parts.push(line("开口时钟", `<div class="hfbar"><i style="width:0"></i></div>`,
-        { text: lastSent ? "未配置最小间隔" : "全表没有发送记录", cls: "mut", l: "还没主动过", r: gapMin ? `间隔 ${gapMin} 分` : "不限制" }));
-    }
-    if (cap) {
-      const n = Math.min(cap, 24);
-      const dots = Array.from({ length: n }).map((_, k) => `<i class="${k < sent24 ? "on" : ""}"></i>`).join("");
-      const midnight = new Date(); midnight.setHours(24, 0, 0, 0);
-      const hoursLeft = Math.max(0, (midnight.getTime() / 1000 - nowS) / 3600);
-      const nextRel = `每天 0 点重置（还有约 ${hoursLeft < 1 ? Math.max(1, Math.round(hoursLeft * 60)) + " 分钟" : Math.round(hoursLeft) + " 小时"}）`;
-      parts.push(line("今日额度（自然日）", `<div class="hfdots">${dots}</div>`,
-        { text: `${sent24} / ${cap} 条${sent24 >= cap ? "（已达上限）" : ""}`, cls: sent24 >= cap ? "warn" : "ok",
-          l: nextRel, r: "0:00–24:00 · 手动试发不占额度" }));
-    } else {
-      parts.push(line("今日额度（自然日）", `<div class="hfdots"><i></i></div>`, { text: `${sent24} 条（未配置上限）`, cls: "mut", l: "没设上限", r: "不会因额度被拦" }));
-    }
-    const qsPct = qs !== null ? (qs / 1440) * 100 : null;
-    const qePct = qe !== null ? (qe / 1440) * 100 : null;
-    let qbody = "";
-    if (qsPct !== null && qePct !== null && qs !== qe) {
-      const segs = qsPct < qePct ? [[qsPct, qePct - qsPct]] : [[qsPct, 100 - qsPct], [0, qePct]];
-      qbody = `<div class="hfbar q"><i style="width:0"></i>${segs.map(([l, w]) => `<span class="hfq" style="left:${l.toFixed(1)}%;width:${w.toFixed(1)}%"></span>`).join("")}<span class="hfnow" style="left:${((nowMin / 1440) * 100).toFixed(1)}%"></span></div>`;
-    } else {
-      qbody = `<div class="hfbar q"><i style="width:0"></i><span class="hfnow" style="left:${((nowMin / 1440) * 100).toFixed(1)}%"></span></div>`;
-    }
-    parts.push(line("静默时段（24 小时）", qbody,
-      { text: inQuiet === null ? "未配置（不拦截）" : inQuiet ? "现在在静默期内" : "现在不在静默期", cls: inQuiet === null ? "mut" : inQuiet ? "warn" : "ok",
-        l: qs !== null && qe !== null ? `${cfgStr(cfg.proactive_quiet_start)} – ${cfgStr(cfg.proactive_quiet_end)}` : "未配置",
-        r: inQuiet !== null && qs !== qe ? "彩色段 = 静默区间" : "起止相同视为不启用" }));
-    el.innerHTML = parts.join("");
-  });
-
-  const rowsBox = host.querySelector("#paCountRows");
-  if (rowsBox) {
-    const row = (k, v, extra) => `<div class="kv">${k}<span>${v}${extra ? ` <span class="mut">${extra}</span>` : ""}</span></div>`;
-    rowsBox.innerHTML =
-      row("距上次主动", lastSent ? esc(timeAgo(lastSent)) : "全表没有发送记录", gapMin ? (gapLeftS > 0 ? "还需等约 " + Math.ceil(gapLeftS / 60) + " 分钟（最小间隔仅对同一会话生效）" : "已过最小间隔（会话级护栏）") : "未配置最小间隔") +
-      row("今日额度（自然日）", cap ? `${fmtNum(sent24)} / ${fmtNum(cap)} 条` : `${fmtNum(sent24)} 条（无上限）`, "自然日 0:00–24:00（按 AstrBot 时区）· 每天 0 点重置 · 手动试发不占额度") +
-      row("静默时段", qs !== null && qe !== null ? `${esc(cfgStr(cfg.proactive_quiet_start))} – ${esc(cfgStr(cfg.proactive_quiet_end))}` : "未配置", inQuiet === null ? "（不拦截）" : inQuiet ? "现在在静默期内" : "现在不在静默期") +
-      row("静默多久才考虑", cfg.proactive_idle_min != null ? `${fmtNum(cfg.proactive_idle_min)} 分钟` : "未配置") +
-      row("影子模式", cfg.proactive_shadow ? "已开启（只挑选、不真发）" : "关闭（会真发）");
-  }
+      const P = C.palette();   // 主题色板（深/浅色都能适配）
   // 24 小时投递节律热力条（本页流水）
   mount(host, "#paHeat", (el) => {
     const hours = new Array(24).fill(0);
@@ -1913,7 +1900,7 @@ const DOMAIN_RENDERERS = {
 const DOMAIN_EXTRAS = {
   gate: [["参数（阈值 / 窗口 / 影子模式）", renderGateConf]],
   proactive: [["候选人名单（谁会收到主动消息）", renderProactivePool],
-              ["投递审计（时钟 / 节律 / 时间轴）", renderProactiveAudit],
+              ["投递审计（节律 / 时间轴）", renderProactiveAudit],
               ["参数（额度 / 静默 / 间隔）", renderProactiveConf]],
   recall: [["参数（三档处理 / 降权系数）", renderRecallConf]],
   favour: [["关系洞察", renderFavourInsight], ["参数（结算模式 / 上限 / 半衰期）", renderFavourConf]],

@@ -148,8 +148,40 @@ def tone_line(zone: str, overrides: dict[str, str] | None = None) -> str:
     return TONE_LINES.get(zone, TONE_LINES["NEUTRAL"])
 
 
-def build_memory_context(memories: list[dict[str, Any]], budget_chars: int = 900) -> str:
-    """把召回结果拼成给模型的自然语言片段（不含任何分数）。"""
+def ago_label(ts: float | Any, now: float | None = None) -> str:
+    """时间戳 → 「刚刚 / 12 分钟前 / 3 天前 / 5 个月前」。
+
+    刻意只给**相对**时间：绝对日期要时区，而这里是注入路径上的无状态纯函数；
+    相对量已经够模型判断「刚发生的还是陈年旧事」，也不会因为容器时区配错而说谎
+    （真机踩过：容器 TZ=UTC，naive 时间整整差 8 小时）。
+    """
+    try:
+        t = float(ts or 0)
+    except (TypeError, ValueError):
+        return ""
+    if t <= 0:
+        return ""
+    delta = max(0.0, float(now if now is not None else time.time()) - t)
+    if delta < 120:
+        return "刚刚"
+    if delta < 3600:
+        return f"{int(delta // 60)} 分钟前"
+    if delta < 86400:
+        return f"{int(delta // 3600)} 小时前"
+    if delta < 30 * 86400:
+        return f"{int(delta // 86400)} 天前"
+    if delta < 365 * 86400:
+        return f"{int(delta // (30 * 86400))} 个月前"
+    return "很久以前"
+
+
+def build_memory_context(memories: list[dict[str, Any]], budget_chars: int = 900, *,
+                         now: float | None = None) -> str:
+    """把召回结果拼成给模型的自然语言片段（不含任何分数）。
+
+    每条记忆带一个「大约多久以前」的方括号标记：模型本来对记忆完全没有时间感，
+    分不清「这是三天前的事还是刚才的事」—— 时间锚是它能接住「上次」「前几天」这类话的前提。
+    """
     if not memories:
         return ""
     lines: list[str] = []
@@ -158,7 +190,8 @@ def build_memory_context(memories: list[dict[str, Any]], budget_chars: int = 900
         summary = (mem.get("summary") or "").strip()
         if not summary:
             continue
-        line = f"- {summary}"
+        when = ago_label(mem.get("occurred_at"), now)
+        line = f"- [{when}] {summary}" if when else f"- {summary}"
         if used + len(line) > budget_chars:
             break
         lines.append(line)
@@ -166,8 +199,8 @@ def build_memory_context(memories: list[dict[str, Any]], budget_chars: int = 900
     if not lines:
         return ""
     return (
-        "（你记得这些事（可能来自更早的对话片段，来源、时间与你此刻说的内容无关，"
-        "不要据此判断用户「刚刚在哪说过」）：\n"
+        "（你记得这些事（方括号里是「大约多久以前」，是我记忆里的粗略时间 —— "
+        "它是参考不是证据，不要拿它去质疑对方「刚才在哪说过什么」）：\n"
         + "\n".join(lines)
         + "\n）"
     )

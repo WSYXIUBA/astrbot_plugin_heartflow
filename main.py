@@ -30,7 +30,7 @@ from astrbot.api.star import Context, Star, StarTools, register
 from astrbot.core.agent.message import TextPart
 from astrbot.core.message.message_event_result import MessageChain
 
-from .core import engine
+from .core import actions, engine
 from .core.service import DEFAULT_CONFIG, StarHeartService
 from .core.storage import Store, session_norm
 
@@ -77,7 +77,7 @@ _CONTACT_SHAPE_KEYS = {
     "StarHeart",
     "肆一纸心",
     "记忆增强：把对话记成长期记忆，聊天时自动想起相关的；附带人物画像、关系与表达习惯，自带可视化面板。",
-    "1.0.0",
+    "1.0.1",
     "https://github.com/WSYXIUBA/astrbot_plugin_starheart",
 )
 class StarHeartPlugin(Star):
@@ -130,6 +130,8 @@ class StarHeartPlugin(Star):
         self._burst: dict[str, dict[str, Any]] = {}
         # 会话滑动窗口：key = session_id，value = 时间戳 deque（存在感惩罚用）
         self._session_windows: dict[str, deque] = {}
+        # 会话最近两条消息的时间（「距上一条消息多久」用；AstrBot 的对话历史里没有时间）
+        self._session_touch: dict[str, dict[str, float]] = {}
         # 门控退避：key = session_id，value = {"n": 指数档, "until": 退避到什么时候, "last": 最近活动}
         self._backoff: dict[str, dict[str, Any]] = {}
         # AstrBot 拼好的完整系统提示词 + 上下文尾（按会话缓存）：主动开口本质是一次对话回复，
@@ -138,6 +140,11 @@ class StarHeartPlugin(Star):
         # 缓存一版门控配置给同步的窗口计数用（_initialize 时刷新）
         self._window_cfg: dict[str, Any] = {}
         self._capture_last: dict[str, float] = {}
+        # 跨会话动作台账：bot 借工具（含第三方工具插件）在**别的会话**里干了什么。
+        # 条目只是运行期台账（带 TTL），长期可回忆的部分由 _write_action_memory 落成记忆。
+        self._action_ledger: list[dict[str, Any]] = []
+        # 认不出来的「疑似外发工具」只报一次 debug，避免每轮刷屏
+        self._action_unknown_seen: set[str] = set()
         self._bg_tasks: set[asyncio.Task] = set()
         self._register_page_api()
         self._init_task = asyncio.create_task(self._initialize_boot())
@@ -647,7 +654,7 @@ class StarHeartPlugin(Star):
         """修剪会话级内存字典，防止长期运行无界增长。
 
         这些字典都以会话/发送者为键、只增不减：
-          _session_windows / _backoff / _burst / _capture_bufs / _capture_last
+          _session_windows / _backoff / _burst / _capture_bufs / _capture_last / _session_touch
         （_agent_prompt_cache 另有 64 条上限，其余此前完全没有清理。）
         群聊里 bot 常常不回，槽位就一直挂着 —— 跑几个月就是稳定的内存泄漏。
         """
@@ -666,6 +673,15 @@ class StarHeartPlugin(Star):
         for key in [k for k, ts in self._capture_last.items() if t - float(ts or 0) > 7200.0]:
             self._capture_last.pop(key, None)
             self._capture_bufs.pop(key, None)
+        # 会话最近两条消息的时间：闲置就丢（下次说话自然重建，只是那一轮不说「距上一条多久」）
+        for key in [k for k, v in self._session_touch.items() if t - float(v.get("last") or 0) > idle]:
+            self._session_touch.pop(key, None)
+        # 跨会话动作台账：过期丢（只服务短期知会，长期记忆另有落库路径）
+        if self._action_ledger:
+            fresh = [x for x in self._action_ledger
+                     if t - float(x.get("ts") or 0) <= self.ACTION_LEDGER_KEEP_SECONDS]
+            if len(fresh) != len(self._action_ledger):
+                self._action_ledger[:] = fresh
         if aggressive:
             # 没有 _capture_last 打点的残槽（历史版本留下的）与最旧的提示词缓存
             for key in [k for k in self._capture_bufs if k not in self._capture_last]:
@@ -694,6 +710,11 @@ class StarHeartPlugin(Star):
 
     # 会话级内存字典的保留上限（进 _prune_memory_maps）
     MEM_MAP_IDLE_SECONDS = 3600.0
+
+    # 跨会话动作台账：条数上限 + 最长保留。台账只服务「刚刚/最近」的知会，
+    # 长期可回忆的部分由 _write_action_memory 写成记忆条目，所以这里丢得起。
+    ACTION_LEDGER_MAX = 200
+    ACTION_LEDGER_KEEP_SECONDS = 6 * 3600.0
 
     def _backoff_tick(self, session_id: str, window_count: int, cfg: dict[str, Any]) -> bool:
         try:
@@ -2288,6 +2309,11 @@ class StarHeartPlugin(Star):
             await self._record_corpus(event, text, is_bot=False)
         except Exception as exc:
             logger.debug(f"[StarHeart] 语料落库跳过：{exc}")
+        # 记下本会话这条/上一条的时间：注入里的「距上一条消息多久」靠它（AstrBot 历史里没有时间）
+        try:
+            self._touch_session(session_id)
+        except Exception as exc:                            # noqa: BLE001 记账失败不许影响本轮
+            logger.debug(f"[StarHeart] 会话时间记账跳过：{exc}")
         # 消息留档不在这里做：上面（早退之前）已经对**所有**消息调用过一次 _keep_live_message，
         # 覆盖了图片-only 与 / 开头命令；这里再调一次是纯重复的 DB 往返（审查实证：每条消息被写两遍）。
         # 同一人连发多条时记一笔，供 on_llm_request 合并（bot 自己决定合并回还是逐条回）
@@ -2317,9 +2343,13 @@ class StarHeartPlugin(Star):
                     pass
         return ""
 
-    @staticmethod
-    def _session_facts(event: AstrMessageEvent) -> str:
-        """把「现在在跟谁、在哪种场合」拼成一句自然话，让 bot 知道当前是私聊还是群聊、对方是谁。"""
+    def _session_facts(self, event: AstrMessageEvent, cfg: dict[str, Any] | None = None) -> str:
+        """把「现在几点、在跟谁、在哪种场合、距上一条多久」拼成一句自然话。
+
+        时间这块为什么要插件补：AstrBot 只在开了「现实世界时间感知」时给一个绝对时刻，
+        而对话历史（req.contexts）里**一条时间都没有** —— 模型无从判断「对方隔了多久才说话」。
+        时区统一走 AstrBot 配置（容器时区常见是 UTC，直接用容器本地时间会差 8 小时）。
+        """
         try:
             is_private = bool(event.is_private_chat())
         except Exception:
@@ -2337,8 +2367,9 @@ class StarHeartPlugin(Star):
         except Exception:
             name = ""
         who = "、".join(x for x in (f"昵称「{name}」" if name else "", f"QQ号 {sender}" if sender else "") if x)
+        clock = self._clock_hint(event, cfg)
         if is_private:
-            return f"【当前会话】私聊 · 对方是{who or '未知用户'}。"
+            return f"【当前会话】私聊 · 对方是{who or '未知用户'}。{clock}"
         gid = ""
         try:
             gid = str(getattr(event.message_obj, "group_id", "") or "")
@@ -2349,7 +2380,211 @@ class StarHeartPlugin(Star):
         except Exception:
             gname = ""
         place = f"群「{gname}」" if gname else (f"群 {gid}" if gid else "某个群")
-        return f"【当前会话】群聊 · 在{place}里，消息来自{who or '未知用户'}。"
+        return f"【当前会话】群聊 · 在{place}里，消息来自{who or '未知用户'}。{clock}"
+
+    def _clock_hint(self, event: AstrMessageEvent, cfg: dict[str, Any] | None = None) -> str:
+        """「现在是 …（周X），距这个会话上一条消息 12 分钟」——纯本地计算，不发 DB 请求。"""
+        from datetime import datetime
+
+        tz = None
+        try:
+            tz = self.service.timezone(dict(cfg or {}))
+        except Exception:                                   # noqa: BLE001 取不到时区就退回本机
+            tz = None
+        try:
+            now_dt = datetime.now(tz) if tz is not None else datetime.now()
+            clock = f"现在是 {now_dt.strftime('%Y-%m-%d %H:%M')}（周{'一二三四五六日'[now_dt.weekday()]}）"
+        except Exception:                                   # noqa: BLE001 时间算不出来就不注入这段
+            return ""
+        gap = self._session_gap_text(self._sid(event))
+        if gap:
+            clock += f"，距这个会话上一条消息 {gap}"
+        return clock + "。"
+
+    def _session_gap_text(self, session_id: str) -> str:
+        """距本会话上一条消息多久（内存记账；不到 1 分钟就不说，免得变成噪音）。"""
+        slot = self._session_touch.get(str(session_id or "")) or {}
+        last_ts = float(slot.get("last") or 0)
+        prev_ts = float(slot.get("prev") or 0)
+        if last_ts <= 0 or prev_ts <= 0:
+            return ""
+        gap = max(0.0, last_ts - prev_ts)
+        if gap < 60:
+            return ""
+        return actions.duration_text(gap)
+
+    def _touch_session(self, session_id: str) -> None:
+        """记下本会话「这一条 / 上一条」的时间：注入里的「距上一条多久」靠它。"""
+        sid = str(session_id or "")
+        if not sid:
+            return
+        now_ts = time.time()
+        slot = self._session_touch.get(sid)
+        self._session_touch[sid] = {
+            "last": now_ts,
+            "prev": float((slot or {}).get("last") or 0),
+        }
+        if len(self._session_touch) > 512:                  # 防无界增长：丢最旧的 128 个会话
+            for key, _ in sorted(
+                self._session_touch.items(), key=lambda kv: float(kv[1].get("last") or 0)
+            )[:128]:
+                self._session_touch.pop(key, None)
+
+    # ---------------- 工具返回后：跨会话动作留痕 ----------------
+    @filter.on_llm_tool_respond()
+    async def note_tool_actions(
+        self, event: AstrMessageEvent, tool: Any, tool_args: dict | None, tool_result: Any
+    ) -> None:
+        """LLM 借工具在**别的会话**里干了什么，这里统一留痕（与具体插件无关）。
+
+        为什么挂这个钩子：AstrBot 在每次工具调用返回后触发它（astr_agent_hooks.py:64-70，
+        EventType.OnLLMToolRespondEvent），参数就是「工具 + 参数 + 返回值」，而且是**全局**的 ——
+        第三方工具类插件（qzone_tools 的 run_wyc_tool → send_message）或 AstrBot 自带的
+        send_message_to_user 代 bot 往外发消息时，本插件照样看得见。这是「不绑定任何具体插件」
+        的关键：谁发的不重要，动作本身才是要记的东西。
+
+        实测现场（2026-10-13）：群里 @ 它让它私聊发一句 → 紧接着在私聊里问「知道这句是谁让你发的吗」，
+        它答「没人让我发」—— 因为那条动作只存在于群会话的上下文里，私聊那边什么都不知道。
+        留痕之后，相关会话的下一轮请求会看到一行知会（见 _inject_context_inner）。
+
+        边界：任何一步失败都只记日志，绝不抛回管线（工具调用是别人的回合，不能因本插件出错）。
+        """
+        try:
+            await self._note_tool_actions_inner(event, tool, tool_args, tool_result)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:                            # noqa: BLE001
+            logger.debug(f"[StarHeart] 跨会话动作留痕跳过：{exc}")
+
+    async def _note_tool_actions_inner(
+        self, event: AstrMessageEvent, tool: Any, tool_args: dict | None, tool_result: Any
+    ) -> None:
+        if not await self._ensure_ready(timeout=3):
+            return
+        cfg = await self.service.config()
+        if not cfg.get("master_switch", True) or not cfg.get("cross_session_enabled", True):
+            return
+        session_id = self._sid(event)
+        if not session_id or not self._is_trackable_session(session_id, cfg):
+            return
+        vis_kind, vis_ident = self.service.session_kind(session_id)
+        vis_ok, _vis_why = self.service.visible(
+            vis_kind, vis_ident, cfg, platform=self._session_head(session_id)
+        )
+        if not vis_ok:
+            return                      # 名单外的会话 = 对 StarHeart 完全不存在（与记忆/语料同一道门）
+        raw_name = str(getattr(tool, "name", "") or "")
+        if not raw_name:
+            return
+        # 工具箱（qzone_tools 的 run_wyc_tool）要拆一层才看得到真正干活的工具名
+        name, args, chain = actions.unwrap(raw_name, tool_args)
+        found = actions.classify(name, args)
+        if not found:
+            if actions.looks_outbound(raw_name) or actions.looks_outbound(name):
+                self._note_unknown_tool(chain or name, args)
+            return
+        ok = actions.action_ok(tool_result)
+        if not ok:
+            logger.debug(
+                f"[StarHeart] 外发动作未确认成功（不记台账）：{chain} → {actions.result_text(tool_result)[:120]}"
+            )
+            return
+        kind, ident = self.service.session_kind(session_id)
+        name_fn = getattr(event, "get_sender_name", None)
+        try:
+            actor_name = str((name_fn() if callable(name_fn) else "") or "")
+        except Exception:                                   # noqa: BLE001
+            actor_name = ""
+        entry = actions.build_entry(
+            found, chain=chain, session_id=session_id, kind=kind, ident=ident,
+            actor_id=self._sender_id(event), actor_name=actor_name,
+        )
+        if not entry:
+            return                  # 没有目标 / 就是发给本会话自己 → 不记（正常回复不刷台账）
+        self._action_ledger.append(entry)
+        if len(self._action_ledger) > self.ACTION_LEDGER_MAX:
+            del self._action_ledger[:64]
+        logger.info(
+            f"[StarHeart] 跨会话动作留痕：{chain} → {entry['kind']} {entry['target_kind'] or '?'} "
+            f"{entry['target'] or '?'}（来源 {session_id}）"
+        )
+        if cfg.get("cross_session_memory", True):
+            self._spawn(self._write_action_memory(entry), label="action-memory")
+
+    def _note_unknown_tool(self, name: str, args: dict[str, Any]) -> None:
+        """疑似外发工具但没认出来：每种只报一次 debug（方便发现新插件的发送工具，不刷屏）。"""
+        key = str(name or "")
+        if not key or key in self._action_unknown_seen:
+            return
+        if len(self._action_unknown_seen) > 64:
+            self._action_unknown_seen.clear()
+        self._action_unknown_seen.add(key)
+        logger.debug(f"[StarHeart] 疑似外发工具未识别（未记台账）：{key} args={str(args)[:200]}")
+
+    def _cross_session_note(self, event: AstrMessageEvent, cfg: dict[str, Any]) -> str:
+        """本会话相关的跨会话动作 → 注入文本（空 = 不注入）。"""
+        session_id = self._sid(event)
+        if not session_id or not self._action_ledger:
+            return ""
+        kind, ident = self.service.session_kind(session_id)
+        ttl_min = float(cfg.get("cross_session_ttl_min", 120) or 120)
+        items = actions.collect_for(
+            self._action_ledger, kind=kind, ident=ident, session_id=session_id,
+            ttl_sec=max(60.0, ttl_min * 60.0),
+        )
+        if not items:
+            return ""
+        logger.info(f"[StarHeart] 跨会话知会已注入本轮请求（{len(items)} 条）")
+        return actions.render_note(items, kind=kind, ident=ident, session_id=session_id)
+
+    async def _write_action_memory(self, entry: dict[str, Any]) -> None:
+        """把一条跨会话动作写成记忆：知会只在 TTL 内有效，长期回忆要靠记忆库。"""
+        try:
+            summary, content = actions.summarize(entry)
+            if not summary:
+                return
+            persona_id = await self._inject_persona_id()
+            entities = [x for x in (str(entry.get("actor_name") or "").strip(),
+                                    str(entry.get("actor_id") or "").strip()) if x]
+            cues = [content[:24]]
+            mid = await self.store.insert_memory(
+                {
+                    "summary": summary,
+                    "content": content,
+                    "atom_type": "episodic",
+                    "strength": 0.6,
+                    "poignancy": 5,
+                    "source_mode": "action",
+                    "source_ref": f"action:{entry.get('tool') or ''}",
+                    "session_id": str(entry.get("src_session") or ""),
+                    "persona_id": persona_id or "",
+                    "tags": ["跨会话", "动作留痕"],
+                    "entities": entities,
+                    "cues": cues,
+                    "evidence": f"{entry.get('tool') or ''} → {entry.get('target') or ''}",
+                    "recalls": 0,
+                    "status": "active",
+                }
+            )
+            if not mid:
+                return
+            try:
+                await self.store.link_memory(
+                    mid, entities=entities or None, session_id=str(entry.get("src_session") or ""),
+                    persona_id=persona_id or "", cues=cues,
+                )
+            except Exception as exc:                        # noqa: BLE001 建链失败不影响记忆本身
+                logger.debug(f"[StarHeart] 动作记忆建链跳过：{exc}")
+            cfg_emb = await self.service.config()
+            model_name = self._embed_model_name(cfg_emb)
+            vec = await self._embed(f"{summary} {content}".strip()[:512]) if model_name else None
+            if vec and model_name:
+                await self.store.set_embedding(mid, vec, model_name)
+            logger.info(f"[StarHeart] 跨会话动作已写入记忆 {mid}：{summary[:60]}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:                            # noqa: BLE001
+            logger.debug(f"[StarHeart] 动作记忆写入跳过：{exc}")
 
     # ---------------- LLM 请求前：注入记忆与语气 ----------------
     @filter.on_llm_request()
@@ -2396,9 +2631,19 @@ class StarHeartPlugin(Star):
                 await self._burst_merge_into(event, req)
             except Exception as exc:
                 logger.debug(f"[StarHeart] 连发合并跳过：{exc}")
-        # 会话上下文永远注入（群聊/私聊 + 对方昵称与 ID），这不花钱且是 bot 知情的基础
+        # 会话上下文永远注入（群聊/私聊 + 对方昵称与 ID + 现在几点/距上一条多久），
+        # 这不花钱且是 bot 知情的基础
         if cfg.get("session_context_enabled", True):
-            parts.append(self._session_facts(event))
+            parts.append(self._session_facts(event, cfg))
+        # 跨会话动作知会：别人让它在**别的会话**里发了什么（或它在本会话里被要求做过什么）——
+        # 这些都不在本会话的对话历史里，不告知就会出现「问它谁让你发的，它答不知道」。
+        if cfg.get("cross_session_enabled", True):
+            try:
+                note = self._cross_session_note(event, cfg)
+                if note:
+                    parts.append(note)
+            except Exception as exc:                        # noqa: BLE001 知会失败不影响本轮注入
+                logger.debug(f"[StarHeart] 跨会话知会跳过：{exc}")
         if cfg.get("memory_inject_enabled", True):
             top_k = int(cfg.get("memory_inject_top_k", 5))
             persona_id = await self._inject_persona_id()

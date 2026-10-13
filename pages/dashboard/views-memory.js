@@ -6,17 +6,17 @@
  * memory↔memory 的关系链（实体/时序/语义）。
  */
 
-import * as C from "./charts.js?v=1.0.0";
-import { GRAPH_PALETTE } from "./graph.js?v=1.0.0";
+import * as C from "./charts.js?v=1.0.1";
+import { GRAPH_PALETTE } from "./graph.js?v=1.0.1";
 import {
   createGraph3D, webglAvailable, LAYOUT_DEFS, LAYOUT_HOTKEYS, CAM_DEFS, PALETTE_DEFS, TIER_DEFS,
   PARA_DEFS, LEVEL_DEFS, ATOM_LABEL as ATOM_LABEL_3D,
-} from "./graph3d.js?v=1.0.0";
+} from "./graph3d.js?v=1.0.1";
 import {
   $, api, apiPost, apiPostSafe, apiSafe, esc, fmtNum, fmtPct, fmt1, fmtTime, timeAgo, toast, openDrawer, closeDrawer,
   confirmModal, formModal, pageHead, tabBar, card, kpiCard, kpis, secTitle, mount, emptyBlock, skelBlock, jsStr, STATE,
   segmentHtml, syncSeg, countUp, goPage, refreshCurrent,
-} from "./store.js?v=1.0.0";
+} from "./store.js?v=1.0.1";
 
 export const ATOM_LABEL = {
   factual: "事实", episodic: "经历", relational: "关系", preference: "偏好",
@@ -2856,6 +2856,9 @@ export async function renderMemoryConf() {
     ["memory_capture_turns", "触发轮数", "攒够几轮对话触发一次总结", "num", 1, 60],
     ["memory_capture_min_interval", "最小间隔(秒)", "两次总结之间至少隔多久", "num", 30, 7200],
     ["memory_capture_max_per_run", "单次上限", "一次总结最多产出几条记忆", "num", 1, 20],
+    ["cross_session_enabled", "跨会话动作留痕", "bot 借工具（自带或第三方工具类插件）在别的会话里发了消息时，留台账并在相关会话注入知会", "bool"],
+    ["cross_session_ttl_min", "知会有效期(分钟)", "超过这个时间的动作不再注入；长期回忆走记忆库", "num", 10, 1440],
+    ["cross_session_memory", "跨会话动作写入记忆", "关掉则只在有效期内注入知会，不写记忆条目", "bool"],
     ["memory_decay_half_life_days", "衰减半衰期(天)", "记忆强度按指数衰减，这是半衰期", "num", 1, 365],
     ["memory_evict_below", "淘汰阈值", "强度低于此值的记忆会被标记 stale", "num", 0.01, 0.5, 0.01],
   ];

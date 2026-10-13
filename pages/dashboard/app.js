@@ -7,17 +7,17 @@
  * 「先读到数据再画」，不会出现图表画在空容器上的空白页。
  */
 
-import * as charts from "./charts.js?v=1.0.0";
-import { MemoryGraph } from "./graph.js?v=1.0.0";
-import { Graph3D } from "./graph3d.js?v=1.0.0";
+import * as charts from "./charts.js?v=1.0.1";
+import { MemoryGraph } from "./graph.js?v=1.0.1";
+import { Graph3D } from "./graph3d.js?v=1.0.1";
 import {
   $, $$, STATE, initBridge, setLive, setRefreshHook, goPage, toggleTheme, toast, openDrawer, closeDrawer, esc,
    syncSeg, jsStr, emptyBlock, refreshCurrent,
-} from "./store.js?v=1.0.0";
-import * as mem from "./views-memory.js?v=1.0.0";
-import * as evt from "./views-events.js?v=1.0.0";
-import * as sys from "./views-system.js?v=1.0.0";
-import { hfSaveDomain } from "./views-conf.js?v=1.0.0";
+} from "./store.js?v=1.0.1";
+import * as mem from "./views-memory.js?v=1.0.1";
+import * as evt from "./views-events.js?v=1.0.1";
+import * as sys from "./views-system.js?v=1.0.1";
+import { hfSaveDomain } from "./views-conf.js?v=1.0.1";
 
 /* ---------------- 页面表 ---------------- */
 const PAGES = {

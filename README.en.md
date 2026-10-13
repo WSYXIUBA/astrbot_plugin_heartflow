@@ -8,7 +8,7 @@
 | --- | --- |
 | Package | `astrbot_plugin_starheart` |
 | Display name | StarHeart |
-| Current version | `1.0.0` |
+| Current version | `1.0.1` |
 | Author | 肆一纸心 |
 | Repository | <https://github.com/WSYXIUBA/astrbot_plugin_starheart> |
 | Adapters | `aiocqhttp` (OneBot v11 — NapCat, Lagrange, …) |

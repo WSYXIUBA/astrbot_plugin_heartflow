@@ -466,6 +466,13 @@ tbody tr:last-child td{border-bottom:none}
 .hfdots{display:flex;gap:4px;flex-wrap:wrap}
 .hfdots i{width:15px;height:15px;border-radius:4px;background:var(--bd,rgba(128,128,128,.25));display:inline-block}
 .hfdots i.on{background:var(--primary,#3c96ca)}
+.hfopen{position:relative;height:34px}
+.hfopen .otrack{position:absolute;left:0;right:0;bottom:0;height:12px;border-radius:6px;background:var(--bd,rgba(128,128,128,.22))}
+.hfopen .oq{position:absolute;bottom:0;height:12px;border-radius:3px;background:repeating-linear-gradient(45deg,rgba(224,168,0,.45),rgba(224,168,0,.45) 5px,rgba(224,168,0,.22) 5px,rgba(224,168,0,.22) 10px)}
+.hfopen .otick{position:absolute;bottom:12px;width:2px;height:9px;background:rgba(128,128,128,.65);border-radius:1px}
+.hfopen .gopen{position:absolute;bottom:2px;width:2px;height:30px;background:#00c853;border-radius:1px;box-shadow:0 0 5px rgba(0,200,83,.5)}
+.hfopen .golbl{position:absolute;top:0;font-size:9.5px;line-height:1;color:#00c853;font-variant-numeric:tabular-nums;white-space:nowrap;text-shadow:0 0 4px rgba(0,200,83,.35)}
+.hfopen .hfnow{position:absolute;bottom:0;width:2px;height:26px;background:var(--tx1,#e6e6e6);border-radius:2px}
 /* 页头「结论句」：这一页现在是什么状态（消息事件 D 版起用，别的页面也随时能用第 5 个参数） */
 .ph .concl{margin-top:5px;font-size:12.5px;line-height:1.75;color:var(--tx2,var(--tx3));padding-left:9px;border-left:2px solid var(--primary,#3c96ca);max-width:1000px}
 .ph .concl b{color:var(--tx1,#e9ebee)}
@@ -627,6 +634,6 @@ a{color:var(--primary)}
 <div class="modal-mask" id="modalMask"><div class="modal" id="modal"></div></div>
 <div class="toasts" id="toasts"></div>
 
-<script type="module" src="./app.js?v=1.0.0"></script>
+<script type="module" src="./app.js?v=1.0.1"></script>
 </body>
 </html>

@@ -8,7 +8,7 @@
 | --- | --- |
 | 插件名 | `astrbot_plugin_starheart` |
 | 显示名 | StarHeart |
-| 当前版本 | `1.0.0` |
+| 当前版本 | `1.0.1` |
 | 作者 | 肆一纸心 |
 | 仓库 | <https://github.com/WSYXIUBA/astrbot_plugin_starheart> |
 | 适配器 | `aiocqhttp`（OneBot v11 —— NapCat、Lagrange 等都走它） |
